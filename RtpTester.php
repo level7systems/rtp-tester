@@ -15,11 +15,35 @@ class RtpTester
 	private $bs = 160;
 	private $socket;
 	private $keepRunning = true;
+	private $cwd;
+	private $logDir;
+	private $logFileRaw;
+	private $logFileCsv;
+	private $rcvBuffer = [];
 
 	public function __construct($argv)
 	{
 		declare(ticks = 100);
 		error_reporting(E_ALL);
+
+		$this->cwd = __DIR__;
+
+		if (!chdir($this->cwd)) {
+			die(sprintf("Error: failed to 'cd %s'", $this->cwd));
+		}
+
+		$this->logDir = $this->cwd . DIRECTORY_SEPARATOR . "log";
+
+		if (!is_dir($this->logDir) || !is_writeable($this->logDir)) {
+			die(sprintf("Error: %s doesn't exit or is not writeable\n", $this->logDir));
+		}
+
+		$this->logFileRaw = $this->logDir . DIRECTORY_SEPARATOR . "rtp-tester." . time() . ".dump";
+
+		
+		
+		$this->logFileCsv = $this->logDir . DIRECTORY_SEPARATOR . "rtp-tester." . time() . ".csv";
+
         pcntl_signal(SIGTERM, array($this,"signalHandler"));
         pcntl_signal(SIGINT, array($this,"signalHandler"));
 
@@ -83,21 +107,26 @@ class RtpTester
 
 		echo sprintf("Listening for UDP packets on 0.0.0.0:%d...\n", $this->port);
 
-		$prevTime = null;
-		$prevSeq = null;
+		$prevTime = 0;
+
+		$seq = 0;
 
 	    while ($this->keepRunning) {
-	        $msg = $this->readMessage();
+	        if (!$data = $this->readMessage()) {
+	        	continue;
+	        }
 	       	
 	       	if ($prevTime) {
-	       		$diff = $msg['timestamp'] - $prevTime;
+	       		$diff = $data['timestamp'] - $prevTime;
 
 	       		echo sprintf("Time from previous packet %s\n", round($diff,4));
 	       	}
 
-	       	$prevTime = $msg['timestamp'];
+	       	$prevTime = $data['timestamp'];
 
-	        print_r($msg);
+	        $temp = explode(";", $data['msg']);
+
+	        print_r($temp);
 	    }
 	}
 
@@ -145,7 +174,7 @@ class RtpTester
             throw new \Exception(sprintf("Failed to bind 0.0.0.0:%d, %s". $this->port, socket_strerror($err_no)));
         }
         
-        if (!@socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, array("sec"=>0,"usec"=>0))) {
+        if (!@socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, array("sec"=>2,"usec"=>0))) {
             $err_no = socket_last_error($this->socket);
             throw new \Exception(socket_strerror($err_no));
         }
@@ -165,7 +194,17 @@ class RtpTester
         $fromPort = 0;
         $msg = null;
         
-        socket_recvfrom($this->socket, $msg, 10000, 0, $fromIp, $fromPort);
+        if (!@socket_recvfrom($this->socket, $msg, 65535, 0, $fromIp, $fromPort)) {
+            $err_no = socket_last_error($this->socket);
+            if ($err_no == 4) {
+            	echo "\n\nCaught SIGINT, quiting...\n";
+            	$this->keepRunning = false;
+            }
+        }
+
+        if (!$msg) {
+        	return false;
+        }
         
         return [
         	"timestamp"	=> microtime(true),
