@@ -140,8 +140,6 @@ class RtpTester
 	{
 		$this->createSocket();
 
-		echo sprintf("Listening for UDP packets on 0.0.0.0:%d...\n", $this->port);
-
 		$prevTime = 0;
 		$prevDiff = 0;
 		$prevCseq = 0;
@@ -155,6 +153,9 @@ class RtpTester
 		$outOfOrder = 0;
 
 		$reportEveryPackets = $this->reportInterval * $this->pps;
+
+		echo sprintf("Listening for UDP packets on 0.0.0.0:%d, reporting every %d packets (%d seconds)...\n", 
+			$this->port, $reportEveryPackets, $this->reportInterval);
 
 	    while ($this->keepRunning) {
 	        if (!$data = $this->readMessage()) {
@@ -182,7 +183,7 @@ class RtpTester
 
 	        $temp = explode(";", $data['msg']);
 
-	        if (count($temp) === 3 && preg_match('/^[0-9]+$/', $temp[0]) && preg_match('/^[0-9]+\.[0-9]+$/', $temp[1])) {
+	        if (count($temp) === 3 && preg_match('/^[0-9]+$/', $temp[0]) && preg_match('/^[0-9]+(\.[0-9]+)?$/', $temp[1])) {
 
 	        	$rcvSeq = $temp[0];
 
@@ -205,7 +206,7 @@ class RtpTester
 	        	if ($reportCounter >= $reportEveryPackets) {
 
 	        		if ($lost) {
-	        			$lostPercent = round(($reportCounter + $lost) / $lost, 2);
+	        			$lostPercent = round($lost / $reportCounter * 100, 2);
 	        		} else {
 	        			$lostPercent = 0;
 	        		}
@@ -220,7 +221,17 @@ class RtpTester
 	        		echo sprintf("%s (%s:%s): %d seq, time from previous %s ms, latency %sms, jitter: %sms, lost %d%%, out of order: %d\n", 
 	        			$dateTime, $data['from_ip'], $data['from_port'], $rcvSeq, $diff, $latency, $jitterAv, $lostPercent, $outOfOrder);
 
-	        			$this->csvBuffer[] = date("Y-m-d H:i:s").",$rcvSeq,$diff,$latency,$lost,$outOfOrder";
+        			$csv = [
+        				date("Y-m-d H:i:s"),
+        				$rcvSeq,
+        				$diff,
+        				$latency,
+        				$jitterAv,
+        				$lostPercent,
+        				$outOfOrder
+        			];
+
+        			$this->csvBuffer[] = implode(",", $csv);
 	        	}
 	        }
 
