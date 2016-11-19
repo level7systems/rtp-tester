@@ -20,6 +20,7 @@ class RtpTester
 	private $logDir;
 	private $logFileRaw;
 	private $logFileCsv;
+	private $csvReport = false;
 	private $rcvBuffer = [];
 	private $csvBuffer = [];
 
@@ -62,6 +63,10 @@ class RtpTester
 		
 		if (in_array("-s", $argv) && in_array("-c", $argv)) {
 			die("Error: both -s and -c is not allowed\n");
+		}
+
+		if (in_array("-csv", $argv)) {
+			$this->csvReport = true;
 		}
 
 		if (in_array("-s", $argv)) {
@@ -154,8 +159,10 @@ class RtpTester
 
 		$reportEveryPackets = $this->reportInterval * $this->pps;
 
-		echo sprintf("Listening for UDP packets on 0.0.0.0:%d, reporting every %d packets (%d seconds)...\n", 
-			$this->port, $reportEveryPackets, $this->reportInterval);
+		if (!$this->csvReport) {
+			echo sprintf("Listening for UDP packets on 0.0.0.0:%d, reporting every %d packets (%d seconds)...\n", 
+				$this->port, $reportEveryPackets, $this->reportInterval);
+		}
 
 	    while ($this->keepRunning) {
 	        if (!$data = $this->readMessage()) {
@@ -218,9 +225,6 @@ class RtpTester
 	        		$outOfOrder = 0;
 	        		$jitterSum = 0;
 
-	        		echo sprintf("%s (%s:%s): %d seq, time from previous %s ms, latency %sms, jitter: %sms, lost %d%%, out of order: %d\n", 
-	        			$dateTime, $data['from_ip'], $data['from_port'], $rcvSeq, $diff, $latency, $jitterAv, $lostPercent, $outOfOrder);
-
         			$csv = [
         				date("Y-m-d H:i:s"),
         				$rcvSeq,
@@ -230,6 +234,13 @@ class RtpTester
         				$lostPercent,
         				$outOfOrder
         			];
+
+	        		if ($this->csvReport) {
+	        			echo implode(",", $csv) . "\n";
+	        		} else {
+	        			echo sprintf("%s (%s:%s): %d seq, time from previous %s ms, latency %sms, jitter: %sms, lost %d%%, out of order: %d\n", 
+	        				$dateTime, $data['from_ip'], $data['from_port'], $rcvSeq, $diff, $latency, $jitterAv, $lostPercent, $outOfOrder);
+	        		}
 
         			$this->csvBuffer[] = implode(",", $csv);
 	        	}
@@ -266,7 +277,7 @@ class RtpTester
 	        		echo sprintf("Error: failed to write to $this->logFileCsv\n");
 	        	}
 	        }
-
+	        
 	    	echo sprintf(" - raw data saved in: %s\n - csv log in: %s\n", $this->logFileRaw, $this->logFileCsv);
 	    }
 	}
@@ -392,6 +403,7 @@ class RtpTester
 		$usage.= " -p <port>        port number to send to or bind\n";
 		$usage.= " -i <pps>         packets per second to send (default: 50)\n";
 		$usage.= " -b <bs>          payload size in bytes (default: 160 Bytes)\n";
+		$usage.= " -csv  			output stats in csv format\n";
 
 		die($usage . "\n");
 	}
