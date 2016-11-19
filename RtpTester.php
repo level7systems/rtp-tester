@@ -20,6 +20,7 @@ class RtpTester
 	private $logFileRaw;
 	private $logFileCsv;
 	private $rcvBuffer = [];
+	private $csvBuffer = [];
 
 	public function __construct($argv)
 	{
@@ -40,9 +41,15 @@ class RtpTester
 
 		$this->logFileRaw = $this->logDir . DIRECTORY_SEPARATOR . "rtp-tester." . time() . ".dump";
 
-		
-		
+		if (!file_put_contents($this->logFileRaw, "Test started at " . date("Y-m-d H:i:s") . "\n")) {
+			die(sprintf("Error: failed to write to %s", $this->logFileRaw));
+		}
+
 		$this->logFileCsv = $this->logDir . DIRECTORY_SEPARATOR . "rtp-tester." . time() . ".csv";
+
+		if (!file_put_contents($this->logFileCsv, "Test started at " . date("Y-m-d H:i:s") . "\n")) {
+			die(sprintf("Error: failed to write to %s", $this->logFileCsv));
+		}
 
         pcntl_signal(SIGTERM, array($this,"signalHandler"));
         pcntl_signal(SIGINT, array($this,"signalHandler"));
@@ -115,18 +122,42 @@ class RtpTester
 	        if (!$data = $this->readMessage()) {
 	        	continue;
 	        }
+
+	        $timestamp = microtime(true);
+
+	        $seq++;
+
+	        $this->rcvBuffer[] = $data['msg'];
 	       	
 	       	if ($prevTime) {
-	       		$diff = $data['timestamp'] - $prevTime;
-
-	       		echo sprintf("Time from previous packet %s\n", round($diff,4));
+	       		$diff = $timestamp  - $prevTime;
 	       	}
 
-	       	$prevTime = $data['timestamp'];
+	       	$prevTime = $timestamp;
 
 	        $temp = explode(";", $data['msg']);
 
-	        print_r($temp);
+	        if (count($temp) === 3 && preg_match('/^[0-9]+$/', $temp[0]) && preg_match('/^[0-9]+\.[0-9]+$/', $temp[1])) {
+
+	        	$rcvSeq = $temp[0];
+	        	$rcvTimestamp = $temp[1];
+	        	$latency = $timestamp - $rcvTimestamp;
+
+	        	echo sprintf("%d seq (local) / %d seq (remote), time from previous packet %s ms, latency %sms\n", $seq, $rcvSeq, round($diff, 4), round($latency, 4));
+
+	        }
+
+	        if (count($this->rcvBuffer) > 1000) {
+
+	        }
+	    }
+
+	    if (!$seq) {
+	    	echo "No data received\n";
+	    	unlink($this->logFileRaw);
+	    	unlink($this->logFileCsv);
+	    } else {
+	    	echo sprintf("Raw data saved in %s\nCsv log in %s\n", $this->logFileRaw, $this->logFileCsv);
 	    }
 	}
 
