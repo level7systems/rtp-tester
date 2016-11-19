@@ -13,6 +13,7 @@ class RtpTester
 	private $port = 15001;
 	private $pps = 50;
 	private $bs = 160;
+	private $reportInterval = 10;
 	private $socket;
 	private $keepRunning = true;
 	private $cwd;
@@ -142,11 +143,18 @@ class RtpTester
 		echo sprintf("Listening for UDP packets on 0.0.0.0:%d...\n", $this->port);
 
 		$prevTime = 0;
+		$prevDiff = 0;
+		$prevCseq = 0;
+		$reportCounter = 0;
 
 		$seq = 0;
 		$diff = 0;
 		$lost = 0;
+		$jitter = 0;
+		$jitterSum = 0;
 		$outOfOrder = 0;
+
+		$reportEveryPackets = $this->reportInterval * $this->pps;
 
 	    while ($this->keepRunning) {
 	        if (!$data = $this->readMessage()) {
@@ -156,11 +164,17 @@ class RtpTester
 	        $timestamp = microtime(true);
 
 	        $seq++;
+	        $reportCounter++;
 
-	        $this->rcvBuffer[] = $data['msg'];
+	        $this->rcvBuffer[] = $timestamp.";".$data['from_ip'].":".$data['from_port'].";".$data['msg'];
 	       	
 	       	if ($prevTime) {
 	       		$diff = round(($timestamp - $prevTime) * 1000, 4);
+
+	       		$jitter = abs($prevDiff - $diff);
+	       		$jitterSum+= $jitter;
+
+	       		$prevDiff = $diff;
 	       	}
 
 	       	$prevTime = $timestamp;
@@ -170,19 +184,40 @@ class RtpTester
 	        if (count($temp) === 3 && preg_match('/^[0-9]+$/', $temp[0]) && preg_match('/^[0-9]+\.[0-9]+$/', $temp[1])) {
 
 	        	$rcvSeq = $temp[0];
+
+	        	if ($prevCseq) {
+	        		
+	        		if (($rcvSeq - $prevCseq) > 1) {
+	        			$lost+= $rcvSeq - $prevCseq;
+	        		}
+
+	        		if ($rcvSeq < $prevCseq) {
+	        			$outOfOrder++;
+	        		}
+	        	}
+
 	        	$rcvTimestamp = $temp[1];
 	        	$latency = round(($timestamp - $rcvTimestamp) * 1000, 4);
 
-	        	if ($seq > $rcvSeq) {
-	        		$lost = $seq - $rcvSeq;
-	        		$seq = $rcvSeq;
-	        	}
+	        	$prevCseq = $rcvSeq;
 
-	        	if ($seq < $rcvSeq) {
-	        		$outOfOrder++;
-	        	}
+	        	if ($reportCounter >= $reportEveryPackets) {
 
-	        	echo sprintf("%s:%s: %d seq, time from previous %s ms, latency %sms, lost %d, out of order: %d\n", $data['from_ip'], $data['from_port'], $rcvSeq, $diff, $latency, $lost, $outOfOrder);
+	        		if ($lost) {
+	        			$lostPercent = round(($reportCounter + $lost) / $lost, 2);
+	        		} else {
+	        			$lostPercent = 0;
+	        		}
+
+	        		$jitterAv = round($jitterSum / $reportCounter, 2);
+
+	        		$reportCounter = 0;
+	        		$lost = 0;
+	        		$outOfOrder = 0;
+	        		$jitterSum = 0;
+
+	        		echo sprintf("%s:%s: %d seq, time from previous %s ms, latency %sms, jitter: %sms, lost %d%%, out of order: %d\n", $data['from_ip'], $data['from_port'], $rcvSeq, $diff, $latency, $jitterAv, $lostPercent, $outOfOrder);
+	        	}
 
 	        	$this->csvBuffer[] = "$rcvSeq,$diff,$latency,$lost,$outOfOrder";
 	        }
