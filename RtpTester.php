@@ -177,12 +177,15 @@ class RtpTester
 		$seq = 0;
 
 		while ($this->keepRunning) {
+			
+			$seq++;
+
 			$header = $seq . ";" . microtime(true)  .";";
 
 			$msg = str_pad($header, $this->bs, "Q");
 
 			$this->sendMessage($msg);
-			$seq++;
+			
 			usleep($sleep);
 		}
 
