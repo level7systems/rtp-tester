@@ -162,11 +162,12 @@ class RtpTester
 	        }
 
 	        $timestamp = microtime(true);
+	        $dateTime = date("Y-m-d H:i:s");
 
 	        $seq++;
 	        $reportCounter++;
 
-	        $this->rcvBuffer[] = $timestamp.";".$data['from_ip'].":".$data['from_port'].";".$data['msg'];
+	        $this->rcvBuffer[] = $dateTime.";".$timestamp.";".$data['from_ip'].":".$data['from_port'].";".$data['msg'];
 	       	
 	       	if ($prevTime) {
 	       		$diff = round(($timestamp - $prevTime) * 1000, 4);
@@ -216,10 +217,11 @@ class RtpTester
 	        		$outOfOrder = 0;
 	        		$jitterSum = 0;
 
-	        		echo sprintf("%s:%s: %d seq, time from previous %s ms, latency %sms, jitter: %sms, lost %d%%, out of order: %d\n", $data['from_ip'], $data['from_port'], $rcvSeq, $diff, $latency, $jitterAv, $lostPercent, $outOfOrder);
-	        	}
+	        		echo sprintf("%s (%s:%s): %d seq, time from previous %s ms, latency %sms, jitter: %sms, lost %d%%, out of order: %d\n", 
+	        			$dateTime, $data['from_ip'], $data['from_port'], $rcvSeq, $diff, $latency, $jitterAv, $lostPercent, $outOfOrder);
 
-	        	$this->csvBuffer[] = "$rcvSeq,$diff,$latency,$lost,$outOfOrder";
+	        			$this->csvBuffer[] = date("Y-m-d H:i:s").",$rcvSeq,$diff,$latency,$lost,$outOfOrder";
+	        	}
 	        }
 
 	        if (count($this->rcvBuffer) > 1000) {
