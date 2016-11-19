@@ -14,10 +14,14 @@ class RtpTester
 	private $pps = 50;
 	private $bs = 160;
 	private $socket;
+	private $keepRunning = true;
 
 	public function __construct($argv)
 	{
+		declare(ticks = 100);
 		error_reporting(E_ALL);
+        pcntl_signal(SIGTERM, array($this,"signalHandler"));
+        pcntl_signal(SIGINT, array($this,"signalHandler"));
 
 		if (in_array("-h", $argv) || in_array("--h", $argv) || in_array("-help", $argv) || in_array("--help", $argv)) {
 			$this->printUsage();
@@ -82,15 +86,9 @@ class RtpTester
 		$prevTime = null;
 		$prevSeq = null;
 
-	    while (true) {
+	    while ($this->keepRunning) {
 	        $msg = $this->readMessage();
 	       	
-	        //$msec = ;
-
-	        //$timestamp = $msec / 1000;
-
-	       	//echo  date("Y-m-d H:i:s", $timestamp). "\n";
-	       	//
 	       	if ($prevTime) {
 	       		$diff = $msg['timestamp'] - $prevTime;
 
@@ -107,14 +105,19 @@ class RtpTester
 	{
 		$this->createSocket();
 
+		echo sprintf("Sending %d x %s Bytes packets every second to %s:%s...\n", $this->pps, $this->bs, $this->serverIp, $this->port);
+		echo "Press Ctrl + C to stop.\n";
+
+		$startTime = time();
+
 		$msec = 1000000;
 
 		$sleep = $msec / $this->pps;
 
 		$seq = 0;
 
-		while (true) {
-			$header = $seq . ";" . microtime(true) .";";
+		while ($this->keepRunning) {
+			$header = $seq . ";" . microtime(true)  .";";
 
 			$msg = str_pad($header, $this->bs, "Q");
 
@@ -122,6 +125,12 @@ class RtpTester
 			$seq++;
 			usleep($sleep);
 		}
+
+		$runTime = time() - $startTime;
+
+		socket_close($this->socket);
+
+		echo sprintf("Sent %d packets in %d seconds\n", $seq, $runTime);
 	}
 
     private function createSocket()
@@ -172,6 +181,23 @@ class RtpTester
 	      	$err_no = socket_last_error($this->socket);
 	      	throw new \Exception("Failed to send data to ".$this->serverIp.":".$this->port.", ".socket_strerror($err_no));
 	    }
+    }
+
+    /**
+     * Signal handler
+     */
+    private function signalHandler($signal)
+    {
+        switch($signal) {
+            case SIGTERM:
+            case SIGKILL:
+            case SIGINT:
+                echo "\n\nCaught SIGINT, quiting...\n";
+                $this->keepRunning = false;
+                break;
+            default:
+            	die("\n\nCaught $signal, terminating...\n");
+        }
     }
 
 	private function printUsage()
