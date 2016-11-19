@@ -160,7 +160,7 @@ class RtpTester
 	        $this->rcvBuffer[] = $data['msg'];
 	       	
 	       	if ($prevTime) {
-	       		$diff = round($timestamp - $prevTime, 4);
+	       		$diff = round(($timestamp - $prevTime) * 1000, 4);
 	       	}
 
 	       	$prevTime = $timestamp;
@@ -171,7 +171,7 @@ class RtpTester
 
 	        	$rcvSeq = $temp[0];
 	        	$rcvTimestamp = $temp[1];
-	        	$latency = round($timestamp - $rcvTimestamp, 4);
+	        	$latency = round(($timestamp - $rcvTimestamp) * 1000, 4);
 
 	        	if ($seq > $rcvSeq) {
 	        		$lost = $seq - $rcvSeq;
