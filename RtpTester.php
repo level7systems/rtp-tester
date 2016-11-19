@@ -10,7 +10,7 @@ class RtpTester
 	private $debug = false;
 	private $mode;
 	private $serverIp;
-	private $port = 15001;
+	private $port = 25000;
 	private $pps = 50;
 	private $bs = 160;
 	private $reportInterval = 10;
