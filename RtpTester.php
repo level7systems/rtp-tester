@@ -11,6 +11,8 @@ class RtpTester
 	private $mode;
 	private $serverIp;
 	private $port = 15001;
+	private $pps = 50;
+	private $bs = 160;
 	private $socket;
 
 	public function __construct($argv)
@@ -43,6 +45,19 @@ class RtpTester
 
 			$this->serverIp = $argv[$key+1];
 
+			if ($key = array_search("-i", $argv)) {
+
+				if (!isset($argv[$key+1])) {
+					die("Error: <pps> parameter missing\n");
+				}
+
+				if (!preg_match('/^[0-9]+$/', $argv[$key+1]) || $argv[$key+1] < 30 || $argv[$key+1] > 50) {
+					die("Error: <pps> has to be a number between 30-50\n");
+				}
+
+				$this->pps = $argv[$key+1];
+			}
+
 			$this->mode = self::MODE_CLIENT;
 		}
 	}
@@ -63,10 +78,31 @@ class RtpTester
 		$this->createSocket();
 
 		echo sprintf("Listening for UDP packets on 0.0.0.0:%d...\n", $this->port);
-
+		
 	    while (true) {
 	        $msg = $this->readMessage();
 	    }
+	}
+
+	private function startClient()
+	{
+		$this->createSocket();
+
+		$msec = 1000000;
+
+		$sleep = $msec / $this->pps;
+
+		$seq = 0;
+
+		while (true) {
+			$header = $seq . ";" . microtime(true) .";";
+
+			$msg = str_pad($header, $this->bs, "Q");
+
+			$this->sendMessage($msg);
+			$seq++;
+			usleep($sleep);
+		}
 	}
 
     private function createSocket()
@@ -110,12 +146,22 @@ class RtpTester
         ];
     }
 
+    private function sendMessage($data)
+    {
+	    if (!@socket_sendto($this->socket, $data, strlen($data), 0, $this->serverIp, $this->port)) {
+	      	$err_no = socket_last_error($this->socket);
+	      	throw new \Exception("Failed to send data to ".$this->serverIp.":".$this->port.", ".socket_strerror($err_no));
+	    }
+    }
+
 	private function printUsage()
 	{
 		$usage = "rtp-tester.php [options]\n\n";
 		$usage.= "available options:\n";
 		$usage.= " -s               run is server mode\n";
 		$usage.= " -c <server_ip>   run is client mode\n";
+		$usage.= " -i <pps>         packets per second to send (default: 50)\n";
+		$usage.= " -p <bs>          payload size in bytes (default: 160 Bytes)\n";
 
 		die($usage . "\n");
 	}
