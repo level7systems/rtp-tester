@@ -64,8 +64,27 @@ class RtpTester
 
 		echo sprintf("Listening for UDP packets on 0.0.0.0:%d...\n", $this->port);
 
+		$prevTime = null;
+		$prevSeq = null;
+
 	    while (true) {
 	        $msg = $this->readMessage();
+	       	
+	        //$msec = ;
+
+	        //$timestamp = $msec / 1000;
+
+	       	//echo  date("Y-m-d H:i:s", $timestamp). "\n";
+	       	//
+	       	if ($prevTime) {
+	       		$diff = $msg['timestamp'] - $prevTime;
+
+	       		echo sprintf("Time from previous packet %s\n", round($diff,4));
+	       	}
+
+	       	$prevTime = $msg['timestamp'];
+
+	        print_r($msg);
 	    }
 	}
 
@@ -104,6 +123,7 @@ class RtpTester
         socket_recvfrom($this->socket, $msg, 10000, 0, $fromIp, $fromPort);
         
         return [
+        	"timestamp"	=> microtime(true),
         	"msg" 		=> $msg,
         	"from_ip" 	=> $fromIp,
         	"from_port"	=> $fromPort
