@@ -182,7 +182,7 @@ class RtpTester
 	        		$outOfOrder++;
 	        	}
 
-	        	echo sprintf("%d seq, time from previous %s ms, latency %sms, lost %d, out of order: %d\n", $rcvSeq, $diff, $latency, $lost, $outOfOrder);
+	        	echo sprintf("%s:%s: %d seq, time from previous %s ms, latency %sms, lost %d, out of order: %d\n", $data['from_ip'], $data['from_port'], $rcvSeq, $diff, $latency, $lost, $outOfOrder);
 
 	        	$this->csvBuffer[] = "$rcvSeq,$diff,$latency,$lost,$outOfOrder";
 	        }
