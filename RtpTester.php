@@ -74,8 +74,8 @@ class RtpTester
 				die("Error: <port> parameter missing\n");
 			}
 
-			if (!preg_match('/^[0-9]+$/', $argv[$key+1]) || $argv[$key+1] < 10000 || $argv[$key+1] > 20000) {
-				die("Error: <port> has to be a number between 10000-20000\n");
+			if (!preg_match('/^[0-9]+$/', $argv[$key+1]) || $argv[$key+1] < 10000 || $argv[$key+1] > 60000) {
+				die("Error: <port> has to be a number between 10000-60000\n");
 			}
 
 			$this->port = $argv[$key+1];
