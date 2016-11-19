@@ -26,6 +26,7 @@ class RtpTester
 	{
 		declare(ticks = 100);
 		error_reporting(E_ALL);
+		date_default_timezone_set('UTC');
 
 		$this->cwd = __DIR__;
 
@@ -66,6 +67,19 @@ class RtpTester
 			$this->mode = self::MODE_SERVER;
 		}
 
+		if ($key = array_search("-p", $argv)) {
+
+			if (!isset($argv[$key+1])) {
+				die("Error: <port> parameter missing\n");
+			}
+
+			if (!preg_match('/^[0-9]+$/', $argv[$key+1]) || $argv[$key+1] < 10000 || $argv[$key+1] > 20000) {
+				die("Error: <port> has to be a number between 10000-20000\n");
+			}
+
+			$this->port = $argv[$key+1];
+		}
+
 		if (in_array("-c", $argv)) {
 			
 			$key = array_search("-c", $argv);
@@ -93,6 +107,19 @@ class RtpTester
 				$this->pps = $argv[$key+1];
 			}
 
+			if ($key = array_search("-b", $argv)) {
+
+				if (!isset($argv[$key+1])) {
+					die("Error: <bs> parameter missing\n");
+				}
+
+				if (!preg_match('/^[0-9]+$/', $argv[$key+1]) || $argv[$key+1] < 20 || $argv[$key+1] > 160) {
+					die("Error: <bs> has to be a number between 20-160\n");
+				}
+
+				$this->bs = $argv[$key+1];
+			}
+
 			$this->mode = self::MODE_CLIENT;
 		}
 	}
@@ -117,6 +144,8 @@ class RtpTester
 		$prevTime = 0;
 
 		$seq = 0;
+		$diff = 0;
+		$lost = 0;
 
 	    while ($this->keepRunning) {
 	        if (!$data = $this->readMessage()) {
@@ -143,12 +172,21 @@ class RtpTester
 	        	$rcvTimestamp = $temp[1];
 	        	$latency = $timestamp - $rcvTimestamp;
 
-	        	echo sprintf("%d seq (local) / %d seq (remote), time from previous packet %s ms, latency %sms\n", $seq, $rcvSeq, round($diff, 4), round($latency, 4));
+	        	if ($seq > $rcvSeq) {
+	        		$lost = $seq - $rcvSeq;
+	        		$seq = $rcvSeq;
+	        	}
+
+	        	echo sprintf("%d seq, time from previous %s ms, latency %sms, lost %d\n", $rcvSeq, round($diff, 4), round($latency, 4), $lost);
 
 	        }
 
 	        if (count($this->rcvBuffer) > 1000) {
+	        	if (!file_put_contents($this->logFileRaw, implode("\n", $this->rcvBuffer), FILE_APPEND)) {
+	        		echo sprintf("Error: failed to write to $this->rcvBuffer\n");
+	        	}
 
+	        	$this->rcvBuffer = [];
 	        }
 	    }
 
@@ -157,6 +195,12 @@ class RtpTester
 	    	unlink($this->logFileRaw);
 	    	unlink($this->logFileCsv);
 	    } else {
+	        if (count($this->rcvBuffer)) {
+	        	if (!file_put_contents($this->logFileRaw, implode("\n", $this->rcvBuffer), FILE_APPEND)) {
+	        		echo sprintf("Error: failed to write to $this->rcvBuffer\n");
+	        	}
+	        }
+
 	    	echo sprintf("Raw data saved in %s\nCsv log in %s\n", $this->logFileRaw, $this->logFileCsv);
 	    }
 	}
@@ -279,8 +323,9 @@ class RtpTester
 		$usage.= "available options:\n";
 		$usage.= " -s               run is server mode\n";
 		$usage.= " -c <server_ip>   run is client mode\n";
+		$usage.= " -p <port>        port number to send to or bind\n";
 		$usage.= " -i <pps>         packets per second to send (default: 50)\n";
-		$usage.= " -p <bs>          payload size in bytes (default: 160 Bytes)\n";
+		$usage.= " -b <bs>          payload size in bytes (default: 160 Bytes)\n";
 
 		die($usage . "\n");
 	}
