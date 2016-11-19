@@ -42,13 +42,13 @@ class RtpTester
 
 		$this->logFileRaw = $this->logDir . DIRECTORY_SEPARATOR . "rtp-tester." . time() . ".dump";
 
-		if (!file_put_contents($this->logFileRaw, "Test started at " . date("Y-m-d H:i:s") . "\n")) {
+		if (file_put_contents($this->logFileRaw, "") === false) {
 			die(sprintf("Error: failed to write to %s", $this->logFileRaw));
 		}
 
 		$this->logFileCsv = $this->logDir . DIRECTORY_SEPARATOR . "rtp-tester." . time() . ".csv";
 
-		if (!file_put_contents($this->logFileCsv, "Test started at " . date("Y-m-d H:i:s") . "\n")) {
+		if (file_put_contents($this->logFileCsv, "") === false) {
 			die(sprintf("Error: failed to write to %s", $this->logFileCsv));
 		}
 
@@ -146,6 +146,7 @@ class RtpTester
 		$seq = 0;
 		$diff = 0;
 		$lost = 0;
+		$outOfOrder = 0;
 
 	    while ($this->keepRunning) {
 	        if (!$data = $this->readMessage()) {
@@ -159,7 +160,7 @@ class RtpTester
 	        $this->rcvBuffer[] = $data['msg'];
 	       	
 	       	if ($prevTime) {
-	       		$diff = $timestamp  - $prevTime;
+	       		$diff = round($timestamp - $prevTime, 4);
 	       	}
 
 	       	$prevTime = $timestamp;
@@ -170,23 +171,34 @@ class RtpTester
 
 	        	$rcvSeq = $temp[0];
 	        	$rcvTimestamp = $temp[1];
-	        	$latency = $timestamp - $rcvTimestamp;
+	        	$latency = round($timestamp - $rcvTimestamp, 4);
 
 	        	if ($seq > $rcvSeq) {
 	        		$lost = $seq - $rcvSeq;
 	        		$seq = $rcvSeq;
 	        	}
 
-	        	echo sprintf("%d seq, time from previous %s ms, latency %sms, lost %d\n", $rcvSeq, round($diff, 4), round($latency, 4), $lost);
+	        	if ($seq < $rcvSeq) {
+	        		$outOfOrder++;
+	        	}
 
+	        	echo sprintf("%d seq, time from previous %s ms, latency %sms, lost %d, out of order: %d\n", $rcvSeq, $diff, $latency, $lost, $outOfOrder);
+
+	        	$this->csvBuffer[] = "$rcvSeq,$diff,$latency,$lost,$outOfOrder";
 	        }
 
 	        if (count($this->rcvBuffer) > 1000) {
-	        	if (!file_put_contents($this->logFileRaw, implode("\n", $this->rcvBuffer), FILE_APPEND)) {
-	        		echo sprintf("Error: failed to write to $this->rcvBuffer\n");
+	        	if (!file_put_contents($this->logFileRaw, implode("\n", $this->rcvBuffer)."\n", FILE_APPEND)) {
+	        		echo sprintf("Error: failed to write to $this->logFileRaw\n");
 	        	}
 
 	        	$this->rcvBuffer = [];
+
+	        	if (!file_put_contents($this->logFileCsv, implode("\n", $this->csvBuffer)."\n", FILE_APPEND)) {
+	        		echo sprintf("Error: failed to write to $this->logFileCsv\n");
+	        	}
+
+	        	$this->csvBuffer = [];
 	        }
 	    }
 
@@ -196,12 +208,18 @@ class RtpTester
 	    	unlink($this->logFileCsv);
 	    } else {
 	        if (count($this->rcvBuffer)) {
-	        	if (!file_put_contents($this->logFileRaw, implode("\n", $this->rcvBuffer), FILE_APPEND)) {
-	        		echo sprintf("Error: failed to write to $this->rcvBuffer\n");
+	        	if (!file_put_contents($this->logFileRaw, implode("\n", $this->rcvBuffer)."\n", FILE_APPEND)) {
+	        		echo sprintf("Error: failed to write to $this->logFileRaw\n");
+	        	}
+	        }
+	        
+	        if (count($this->csvBuffer)) {
+	        	if (!file_put_contents($this->logFileCsv, implode("\n", $this->csvBuffer)."\n", FILE_APPEND)) {
+	        		echo sprintf("Error: failed to write to $this->logFileCsv\n");
 	        	}
 	        }
 
-	    	echo sprintf("Raw data saved in %s\nCsv log in %s\n", $this->logFileRaw, $this->logFileCsv);
+	    	echo sprintf(" - raw data saved in: %s\n - csv log in: %s\n", $this->logFileRaw, $this->logFileCsv);
 	    }
 	}
 
