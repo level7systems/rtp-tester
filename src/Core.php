@@ -57,7 +57,7 @@ class Core
 		}
 
 		if (in_array("-s", $argv)) {
-			$this->mode = self::MODE_SERVER;
+			$this->setMode(self::MODE_SERVER);
 		}
 
 		if ($key = array_search("-p", $argv)) {
@@ -113,7 +113,7 @@ class Core
 				$this->bs = $argv[$key+1];
 			}
 
-			$this->mode = self::MODE_CLIENT;
+			$this->setMode(self::MODE_CLIENT);
 		}
 	}
 
@@ -125,6 +125,16 @@ class Core
 	public function getCwd()
 	{
 		return $this->cwd;
+	}
+
+	private function setMode($v)
+	{
+		$this->mode = $v;
+	}
+
+	public function getMode()
+	{
+		return $this->mode;
 	}
 
 	public function run()
@@ -147,15 +157,16 @@ class Core
 		$this->createSocket();
 
 		$prevTime = 0;
-		$prevDiff = 0;
 		$prevCseq = 0;
 		$reportCounter = 0;
-
-		$seq = 0;
-		$diff = 0;
+		$previousMin = null;
+		$previousMax = null;
+		$latencyMax = null;
+		$latencyMin = null;
 		$lost = 0;
-		$jitter = 0;
-		$jitterSum = 0;
+		$jitterBuffer = [];
+		$latencySum = 0;
+		$previousSum = 0;
 		$outOfOrder = 0;
 
 		$reportEveryPackets = $this->reportInterval * $this->pps;
@@ -171,18 +182,29 @@ class Core
 	        $timestamp = microtime(true);
 	        $dateTime = date("Y-m-d H:i:s");
 
-	        $seq++;
 	        $reportCounter++;
 
 	        $this->rawBuffer[] = $dateTime.";".$timestamp.";".$data['from_ip'].":".$data['from_port'].";".$data['msg'];
 	       	
 	       	if ($prevTime) {
-	       		$diff = round(($timestamp - $prevTime) * 1000, 4);
+	       		$previous = round(($timestamp - $prevTime) * 1000, 4);
 
-	       		$jitter = abs($prevDiff - $diff);
-	       		$jitterSum+= $jitter;
+	       		$jitterBuffer[] = $previous;
 
-	       		$prevDiff = $diff;
+	       		$previousSum+= $previous;
+
+	        	if ($previousMax === null && $previousMin === null) {
+	        		$previousMax = $previous;
+	        		$previousMin = $previous;
+	        	}
+
+	        	if ($previous > $previousMax) {
+	        		$previousMax = $previous;
+	        	}
+
+	        	if ($previous < $previousMin) {
+	        		$previousMin = $previous;
+	        	}
 	       	}
 
 	       	$prevTime = $timestamp;
@@ -204,10 +226,26 @@ class Core
 	        		}
 	        	}
 
+	        	$prevCseq = $rcvSeq;
+
 	        	$rcvTimestamp = $temp[1];
+
 	        	$latency = round(($timestamp - $rcvTimestamp) * 1000, 4);
 
-	        	$prevCseq = $rcvSeq;
+	        	$latencySum+= $latency;
+
+	        	if ($latencyMax === null && $latencyMin === null) {
+	        		$latencyMax = $latency;
+	        		$latencyMin = $latency;
+	        	}
+
+	        	if ($latency > $latencyMax) {
+	        		$latencyMax = $latency;
+	        	}
+
+	        	if ($latency < $latencyMin) {
+	        		$latencyMin = $latency;
+	        	}
 
 	        	if ($reportCounter >= $reportEveryPackets) {
 
@@ -217,26 +255,39 @@ class Core
 	        			$lostPercent = 0;
 	        		}
 
-	        		$jitterAv = round($jitterSum / $reportCounter, 2);
+	        		$jitter = round($this->standardDeviation($jitterBuffer), 2);
 
-	        		$reportCounter = 0;
-	        		$lost = 0;
-	        		$outOfOrder = 0;
-	        		$jitterSum = 0;
+	        		$latencyAverage = round($latencySum / $reportCounter, 2);
+	        		$previousAverage = round($previousSum / $reportCounter, 2);
 
         			$stats = [
         				"timestamp" 	=> date("Y-m-d H:i:s"),
         				"from_ip"		=> $data['from_ip'],
         				"from_port"		=> $data['from_port'],
-        				"rcv_seq"		=> $rcvSeq,
-        				"diff"			=> $diff,
-        				"latency"		=> $latency,
-        				"jitter"		=> $jitterAv,
+        				"seq"			=> $rcvSeq,
+        				"previous"	    => $previousAverage,
+        				"previous_max"  => $previousMax,
+        				"previous_min"  => $previousMin,
+        				"latency"		=> $latencyAverage,
+        				"latency_max"	=> $latencyMax,
+        				"latency_min"	=> $latencyMin,
+        				"jitter"		=> $jitter,
         				"lost_percent"	=> $lostPercent,
         				"out_of_order"	=> $outOfOrder
         			];
 
 	        		$this->logger->logStats($stats);
+
+	        		$reportCounter = 0;
+					$previousMin = null;
+					$previousMax = null;
+					$latencyMax = null;
+					$latencyMin = null;
+	        		$lost = 0;
+	        		$outOfOrder = 0;
+	        		$jitterBuffer = [];
+	        		$latencySum = 0;
+	        		$previousSum = 0;
 	        	}
 	        }
 
@@ -246,9 +297,32 @@ class Core
 	        }
 	    }
 
-	    if ($seq) {
+	    if ($this->rawBuffer) {
 	        $this->logger->flushRaw($this->rawBuffer);
 	    }
+	}
+
+	private function standardDeviation(array $a, $sample = false)
+	{
+        $n = count($a);
+        if ($n === 0) {
+            trigger_error("The array has zero elements", E_USER_WARNING);
+            return false;
+        }
+        if ($sample && $n === 1) {
+            trigger_error("The array has only 1 element", E_USER_WARNING);
+            return false;
+        }
+        $mean = array_sum($a) / $n;
+        $carry = 0.0;
+        foreach ($a as $val) {
+            $d = ((double) $val) - $mean;
+            $carry += $d * $d;
+        };
+        if ($sample) {
+           --$n;
+        }
+        return sqrt($carry / $n);
 	}
 
 	private function startClient()
