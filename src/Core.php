@@ -369,7 +369,7 @@ class Core
         
         if (!@socket_bind($this->socket, "0.0.0.0", $this->port)) {
             $err_no = socket_last_error($this->socket);
-            throw new \Exception(sprintf("Failed to bind 0.0.0.0:%d, %s". $this->port, socket_strerror($err_no)));
+            throw new \Exception(sprintf("Failed to bind 0.0.0.0:%d, %s", $this->port, socket_strerror($err_no)));
         }
         
         if (!@socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, array("sec"=>2,"usec"=>0))) {
