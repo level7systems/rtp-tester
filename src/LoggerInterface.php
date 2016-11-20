@@ -17,12 +17,10 @@ interface LoggerInterface
     public function __construct($argv, \Level7\RtpTester\Core $core);
 
     /**
-     * Logs raw packet
+     * Flush raw packets
      * 
-     * @param string $packet
+     * @param array $buffer
      */
-    public function logRaw($packet);
-
     public function flushRaw($buffer);
     
     /**

@@ -15,7 +15,7 @@ class Logger implements \Level7\RtpTester\LoggerInterface
 	public function __construct($argv, \Level7\RtpTester\Core $core)
 	{
 		$this->core = $core;
-		
+
 		$cwd = $core->getCwd();
 
 		$this->logDir = $cwd . DIRECTORY_SEPARATOR . "log";
@@ -60,11 +60,6 @@ class Logger implements \Level7\RtpTester\LoggerInterface
 	    }
 	}
 
-	public function logRaw($packet)
-	{
-
-	}
-
 	public function flushRaw($buffer)
 	{
 		if (!$buffer) {
@@ -80,6 +75,8 @@ class Logger implements \Level7\RtpTester\LoggerInterface
 
 	public function logStats($data)
 	{
+		$this->logCount++;
+		
 		if ($this->csvReport) {
 			echo implode(", ", $data) ."\n";
 		} else {
