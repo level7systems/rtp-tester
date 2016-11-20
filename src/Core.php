@@ -14,45 +14,35 @@ class Core
 	private $pps = 50;
 	private $bs = 160;
 	private $reportInterval = 10;
+	private $flushInterval = 1000;
 	private $socket;
 	private $keepRunning = true;
 	private $logger;
 	private $cwd;
-	private $logDir;
-	private $logFileRaw;
-	private $logFileCsv;
-	private $csvReport = false;
-	private $rcvBuffer = [];
-	private $csvBuffer = [];
+	private $usage;
+	
+	private $rawBuffer = [];
 
-	public function __construct($argv)
+	public function __construct($argv, $cwd)
 	{
+		$usage = "rtp-tester.php [options]\n\n";
+		$usage.= "available options:\n";
+		$usage.= " -s               run is server mode\n";
+		$usage.= " -c <server_ip>   run is client mode\n";
+		$usage.= " -p <port>        port number to send to or bind\n";
+		$usage.= " -i <pps>         packets per second to send (default: 50)\n";
+		$usage.= " -b <bs>          payload size in bytes (default: 160 Bytes)\n";
+
+		$this->setUsage($usage);
+
 		declare(ticks = 100);
 		error_reporting(E_ALL);
 		date_default_timezone_set('UTC');
 
-		$this->cwd = __DIR__;
+		$this->cwd = $cwd;
 
 		if (!chdir($this->cwd)) {
 			die(sprintf("Error: failed to 'cd %s'", $this->cwd));
-		}
-
-		$this->logDir = $this->cwd . DIRECTORY_SEPARATOR . ".." . DIRECTORY_SEPARATOR. "log";
-
-		if (!is_dir($this->logDir) || !is_writeable($this->logDir)) {
-			die(sprintf("Error: %s doesn't exit or is not writeable\n", $this->logDir));
-		}
-
-		$this->logFileRaw = $this->logDir . DIRECTORY_SEPARATOR . "rtp-tester." . time() . ".dump";
-
-		if (file_put_contents($this->logFileRaw, "") === false) {
-			die(sprintf("Error: failed to write to %s", $this->logFileRaw));
-		}
-
-		$this->logFileCsv = $this->logDir . DIRECTORY_SEPARATOR . "rtp-tester." . time() . ".csv";
-
-		if (file_put_contents($this->logFileCsv, "") === false) {
-			die(sprintf("Error: failed to write to %s", $this->logFileCsv));
 		}
 
         pcntl_signal(SIGTERM, array($this,"signalHandler"));
@@ -64,10 +54,6 @@ class Core
 		
 		if (in_array("-s", $argv) && in_array("-c", $argv)) {
 			die("Error: both -s and -c is not allowed\n");
-		}
-
-		if (in_array("-csv", $argv)) {
-			$this->csvReport = true;
 		}
 
 		if (in_array("-s", $argv)) {
@@ -136,6 +122,11 @@ class Core
 		$this->logger = $logger;
 	}
 
+	public function getCwd()
+	{
+		return $this->cwd;
+	}
+
 	public function run()
 	{
 		if (!$this->logger) {
@@ -169,10 +160,8 @@ class Core
 
 		$reportEveryPackets = $this->reportInterval * $this->pps;
 
-		if (!$this->csvReport) {
-			echo sprintf("Listening for UDP packets on 0.0.0.0:%d, reporting every %d packets (%d seconds)...\n", 
-				$this->port, $reportEveryPackets, $this->reportInterval);
-		}
+		echo sprintf("Listening for UDP packets on 0.0.0.0:%d, reporting every %d packets (%d seconds)...\n", 
+			$this->port, $reportEveryPackets, $this->reportInterval);		
 
 	    while ($this->keepRunning) {
 	        if (!$data = $this->readMessage()) {
@@ -185,7 +174,7 @@ class Core
 	        $seq++;
 	        $reportCounter++;
 
-	        $this->rcvBuffer[] = $dateTime.";".$timestamp.";".$data['from_ip'].":".$data['from_port'].";".$data['msg'];
+	        $this->rawBuffer[] = $dateTime.";".$timestamp.";".$data['from_ip'].":".$data['from_port'].";".$data['msg'];
 	       	
 	       	if ($prevTime) {
 	       		$diff = round(($timestamp - $prevTime) * 1000, 4);
@@ -235,60 +224,30 @@ class Core
 	        		$outOfOrder = 0;
 	        		$jitterSum = 0;
 
-        			$csv = [
-        				date("Y-m-d H:i:s"),
-        				$rcvSeq,
-        				$diff,
-        				$latency,
-        				$jitterAv,
-        				$lostPercent,
-        				$outOfOrder
+        			$stats = [
+        				"timestamp" 	=> date("Y-m-d H:i:s"),
+        				"from_ip"		=> $data['from_ip'],
+        				"from_port"		=> $data['from_port'],
+        				"rcv_seq"		=> $rcvSeq,
+        				"diff"			=> $diff,
+        				"latency"		=> $latency,
+        				"jitter"		=> $jitterAv,
+        				"lost_percent"	=> $lostPercent,
+        				"out_of_order"	=> $outOfOrder
         			];
 
-	        		if ($this->csvReport) {
-	        			echo implode(",", $csv) . "\n";
-	        		} else {
-	        			echo sprintf("%s (%s:%s): %d seq, time from previous %s ms, latency %sms, jitter: %sms, lost %d%%, out of order: %d\n", 
-	        				$dateTime, $data['from_ip'], $data['from_port'], $rcvSeq, $diff, $latency, $jitterAv, $lostPercent, $outOfOrder);
-	        		}
-
-        			$this->csvBuffer[] = implode(",", $csv);
+	        		$this->logger->logStats($stats);
 	        	}
 	        }
 
-	        if (count($this->rcvBuffer) > 1000) {
-	        	if (!file_put_contents($this->logFileRaw, implode("\n", $this->rcvBuffer)."\n", FILE_APPEND)) {
-	        		echo sprintf("Error: failed to write to $this->logFileRaw\n");
-	        	}
-
-	        	$this->rcvBuffer = [];
-
-	        	if (!file_put_contents($this->logFileCsv, implode("\n", $this->csvBuffer)."\n", FILE_APPEND)) {
-	        		echo sprintf("Error: failed to write to $this->logFileCsv\n");
-	        	}
-
-	        	$this->csvBuffer = [];
+	        if (count($this->rawBuffer) > $this->flushInterval) {
+	        	$this->logger->flushRaw($this->rawBuffer);
+	        	$this->rawBuffer = [];
 	        }
 	    }
 
-	    if (!$seq) {
-	    	echo "No data received\n";
-	    	unlink($this->logFileRaw);
-	    	unlink($this->logFileCsv);
-	    } else {
-	        if (count($this->rcvBuffer)) {
-	        	if (!file_put_contents($this->logFileRaw, implode("\n", $this->rcvBuffer)."\n", FILE_APPEND)) {
-	        		echo sprintf("Error: failed to write to $this->logFileRaw\n");
-	        	}
-	        }
-	        
-	        if (count($this->csvBuffer)) {
-	        	if (!file_put_contents($this->logFileCsv, implode("\n", $this->csvBuffer)."\n", FILE_APPEND)) {
-	        		echo sprintf("Error: failed to write to $this->logFileCsv\n");
-	        	}
-	        }
-	        
-	    	echo sprintf(" - raw data saved in: %s\n - csv log in: %s\n", $this->logFileRaw, $this->logFileCsv);
+	    if ($seq) {
+	        $this->logger->flushRaw($this->rawBuffer);
 	    }
 	}
 
@@ -404,17 +363,17 @@ class Core
         }
     }
 
+    public function setUsage($text)
+    {
+    	if (!$this->usage) {
+    		$this->usage = $text;
+    	} else {
+    		$this->usage.= $text;
+    	}
+    }
+
 	private function printUsage()
 	{
-		$usage = "rtp-tester.php [options]\n\n";
-		$usage.= "available options:\n";
-		$usage.= " -s               run is server mode\n";
-		$usage.= " -c <server_ip>   run is client mode\n";
-		$usage.= " -p <port>        port number to send to or bind\n";
-		$usage.= " -i <pps>         packets per second to send (default: 50)\n";
-		$usage.= " -b <bs>          payload size in bytes (default: 160 Bytes)\n";
-		$usage.= " -csv             output stats in csv format\n";
-
-		die($usage . "\n");
+		die($this->usage . "\n");
 	}
 }

@@ -3,8 +3,11 @@
 require_once('src/Core.php');
 require_once('src/Logger.php');
 
-$logger = new \Level7\RtpTester\Logger();
 
-$rtpTester = new \Level7\RtpTester\Core($argv);
+
+$rtpTester = new \Level7\RtpTester\Core($argv, __DIR__);
+
+$logger = new \Level7\RtpTester\Logger($argv, $rtpTester);
 $rtpTester->setLogger($logger);
+
 $rtpTester->run();
