@@ -1,6 +1,10 @@
 #!/usr/bin/php -q
 <?php
+require_once('src/Core.php');
+require_once('src/Logger.php');
 
-require_once('RtpTester.php');
+$logger = new \Level7\RtpTester\Logger();
 
-(new \Level7\RtpTester($argv))->run();
+$rtpTester = new \Level7\RtpTester\Core($argv);
+$rtpTester->setLogger($logger);
+$rtpTester->run();

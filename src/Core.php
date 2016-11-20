@@ -1,8 +1,8 @@
 <?php
 
-namespace Level7;
+namespace Level7\RtpTester;
 
-class RtpTester
+class Core
 {
 	const MODE_SERVER = 's';
 	const MODE_CLIENT = 'c';
@@ -16,6 +16,7 @@ class RtpTester
 	private $reportInterval = 10;
 	private $socket;
 	private $keepRunning = true;
+	private $logger;
 	private $cwd;
 	private $logDir;
 	private $logFileRaw;
@@ -36,7 +37,7 @@ class RtpTester
 			die(sprintf("Error: failed to 'cd %s'", $this->cwd));
 		}
 
-		$this->logDir = $this->cwd . DIRECTORY_SEPARATOR . "log";
+		$this->logDir = $this->cwd . DIRECTORY_SEPARATOR . ".." . DIRECTORY_SEPARATOR. "log";
 
 		if (!is_dir($this->logDir) || !is_writeable($this->logDir)) {
 			die(sprintf("Error: %s doesn't exit or is not writeable\n", $this->logDir));
@@ -130,8 +131,17 @@ class RtpTester
 		}
 	}
 
+	public function setLogger($logger)
+	{
+		$this->logger = $logger;
+	}
+
 	public function run()
 	{
+		if (!$this->logger) {
+			die("Error: unable to start without logger\n");
+		}
+
 		if ($this->mode == self::MODE_CLIENT) {
 			$this->startClient();
 		} else if ($this->mode == self::MODE_SERVER) {
@@ -403,7 +413,7 @@ class RtpTester
 		$usage.= " -p <port>        port number to send to or bind\n";
 		$usage.= " -i <pps>         packets per second to send (default: 50)\n";
 		$usage.= " -b <bs>          payload size in bytes (default: 160 Bytes)\n";
-		$usage.= " -csv  			output stats in csv format\n";
+		$usage.= " -csv             output stats in csv format\n";
 
 		die($usage . "\n");
 	}
