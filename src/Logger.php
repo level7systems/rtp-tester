@@ -1,8 +1,6 @@
 <?php
 namespace Level7\RtpTester;
 
-require_once('src/LoggerInterface.php');
-
 class Logger implements \Level7\RtpTester\LoggerInterface
 {
 	private $core;
@@ -47,7 +45,7 @@ class Logger implements \Level7\RtpTester\LoggerInterface
 
 	public function __destruct()
 	{
-		if ($this->core->getMode() == \Level7\RtpTester\Core::MODE_CLIENT) {
+		if ($this->core->getMode() !== \Level7\RtpTester\Core::MODE_SERVER) {
 			return;
 		}
 
