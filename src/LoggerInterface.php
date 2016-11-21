@@ -29,4 +29,11 @@ interface LoggerInterface
      * @param array $data
      */
     public function logStats($data);
+
+    /**
+     * Logs error
+     * 
+     * @param string $msg
+     */
+    public function logError($msg);
 }

@@ -99,4 +99,9 @@ class Logger implements \Level7\RtpTester\LoggerInterface
     		echo sprintf("Error: failed to write to $this->logFileCsv\n");
     	}
 	}
+
+	public function logError($msg)
+	{
+		echo sprintf("Error: %s\n", $msg);
+	}
 }

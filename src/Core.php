@@ -415,8 +415,9 @@ class Core
     private function sendMessage($data)
     {
 	    if (!@socket_sendto($this->socket, $data, strlen($data), 0, $this->serverIp, $this->port)) {
-	      	$err_no = socket_last_error($this->socket);
-	      	throw new \Exception("Failed to send data to ".$this->serverIp.":".$this->port.", ".socket_strerror($err_no));
+	      	$errNo = socket_last_error($this->socket);
+	      	$errorMsg = socket_strerror($errNo);
+	      	$this->logger->logError(sprintf("Failed to send data to %s:%d, (%d) %s", $this->serverIp, $this->port, $err_no, $errorMsg));
 	    }
     }
 
