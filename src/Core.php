@@ -15,11 +15,30 @@ class Core
 	private $bs = 160;
 	private $reportInterval = 10;
 	private $flushInterval = 1000;
+	private $packetsPerInterval;
 	private $socket;
 	private $keepRunning = true;
 	private $logger;
 	private $cwd;
 	private $usage;
+	private $doReport = false;
+	private $fromIp = null;
+	private $fromPort = null;
+	private $lastReportAt = 0;
+
+	private	$previousMin = null;
+	private	$previousMax = null;
+	private	$latencyMax = null;
+	private	$latencyMin = null;
+	private	$lost = 0;
+	private $receivedCount = 0;
+
+	private	$jitterBuffer = [];
+	private	$latencySum = 0;
+	private	$previousSum = 0;
+	private	$outOfOrder = 0;
+	private $rcvSeq = 0;
+	private $prevTime = 0;
 	
 	private $rawBuffer = [];
 
@@ -35,7 +54,7 @@ class Core
 
 		$this->setUsage($usage);
 
-		declare(ticks = 100);
+		declare(ticks = 1);
 		error_reporting(E_ALL);
 		date_default_timezone_set('UTC');
 
@@ -47,6 +66,7 @@ class Core
 
         pcntl_signal(SIGTERM, array($this,"signalHandler"));
         pcntl_signal(SIGINT, array($this,"signalHandler"));
+        register_tick_function(array($this, "tickHandler"));
 
 		if (in_array("-h", $argv) || in_array("--h", $argv) || in_array("-help", $argv) || in_array("--help", $argv)) {
 			$this->printUsage();
@@ -73,6 +93,21 @@ class Core
 			$this->port = $argv[$key+1];
 		}
 
+		if ($key = array_search("-i", $argv)) {
+
+			if (!isset($argv[$key+1])) {
+				die("Error: <pps> parameter missing\n");
+			}
+
+			if (!preg_match('/^[0-9]+$/', $argv[$key+1]) || $argv[$key+1] < 30 || $argv[$key+1] > 50) {
+				die("Error: <pps> has to be a number between 30-50\n");
+			}
+
+			$this->pps = $argv[$key+1];
+		}
+
+		$this->packetsPerInterval = $this->reportInterval * $this->pps;
+
 		if (in_array("-c", $argv)) {
 			
 			$key = array_search("-c", $argv);
@@ -86,19 +121,6 @@ class Core
 			}
 
 			$this->serverIp = $argv[$key+1];
-
-			if ($key = array_search("-i", $argv)) {
-
-				if (!isset($argv[$key+1])) {
-					die("Error: <pps> parameter missing\n");
-				}
-
-				if (!preg_match('/^[0-9]+$/', $argv[$key+1]) || $argv[$key+1] < 30 || $argv[$key+1] > 50) {
-					die("Error: <pps> has to be a number between 30-50\n");
-				}
-
-				$this->pps = $argv[$key+1];
-			}
 
 			if ($key = array_search("-b", $argv)) {
 
@@ -156,23 +178,10 @@ class Core
 	{
 		$this->createSocket();
 
-		$prevTime = 0;
 		$prevCseq = 0;
-		$reportCounter = 0;
-		$previousMin = null;
-		$previousMax = null;
-		$latencyMax = null;
-		$latencyMin = null;
-		$lost = 0;
-		$jitterBuffer = [];
-		$latencySum = 0;
-		$previousSum = 0;
-		$outOfOrder = 0;
 
-		$reportEveryPackets = $this->reportInterval * $this->pps;
-
-		echo sprintf("Listening for UDP packets on 0.0.0.0:%d, reporting every %d packets (%d seconds)...\n", 
-			$this->port, $reportEveryPackets, $this->reportInterval);		
+		echo sprintf("Listening for UDP packets on 0.0.0.0:%d, reporting every %d seconds...\n", 
+			$this->port, $this->reportInterval);		
 
 	    while ($this->keepRunning) {
 	        if (!$data = $this->readMessage()) {
@@ -182,113 +191,77 @@ class Core
 	        $timestamp = microtime(true);
 	        $dateTime = date("Y-m-d H:i:s");
 
-	        $reportCounter++;
+	        $this->receivedCount++;
+
+	        //echo date("Y-m-d H:i:s")." - receivedCount: " . $this->receivedCount ."\n";
 
 	        $this->rawBuffer[] = $dateTime.";".$timestamp.";".$data['from_ip'].":".$data['from_port'].";".$data['msg'];
 	       	
-	       	if ($prevTime) {
-	       		$previous = round(($timestamp - $prevTime) * 1000, 4);
+	       	if ($this->prevTime) {
+	       		$previous = round(($timestamp - $this->prevTime) * 1000, 4);
 
-	       		$jitterBuffer[] = $previous;
+	       		$this->jitterBuffer[] = $previous;
 
-	       		$previousSum+= $previous;
+	       		$this->previousSum+= $previous;
 
-	        	if ($previousMax === null && $previousMin === null) {
-	        		$previousMax = $previous;
-	        		$previousMin = $previous;
+	        	if ($this->previousMax === null && $this->previousMin === null) {
+	        		$this->previousMax = $previous;
+	        		$this->previousMin = $previous;
 	        	}
 
-	        	if ($previous > $previousMax) {
-	        		$previousMax = $previous;
+	        	if ($previous > $this->previousMax) {
+	        		$this->previousMax = $previous;
 	        	}
 
-	        	if ($previous < $previousMin) {
-	        		$previousMin = $previous;
+	        	if ($previous < $this->previousMin) {
+	        		$this->previousMin = $previous;
 	        	}
 	       	}
 
-	       	$prevTime = $timestamp;
+	       	$this->prevTime = $timestamp;
 
 	        $temp = explode(";", $data['msg']);
 
 	        if (count($temp) === 3 && preg_match('/^[0-9]+$/', $temp[0]) && preg_match('/^[0-9]+(\.[0-9]+)?$/', $temp[1])) {
 
-	        	$rcvSeq = $temp[0];
+	        	$this->rcvSeq = $temp[0];
 
 	        	if ($prevCseq) {
 	        		
-	        		if (($rcvSeq - $prevCseq) > 1) {
-	        			$lost+= $rcvSeq - $prevCseq;
+	        		if (($this->rcvSeq - $prevCseq) > 1) {
+	        			$this->lost+= $this->rcvSeq - $prevCseq;
 	        		}
 
-	        		if ($rcvSeq < $prevCseq) {
-	        			$outOfOrder++;
+	        		if ($this->rcvSeq < $prevCseq) {
+	        			$this->outOfOrder++;
 	        		}
 	        	}
 
-	        	$prevCseq = $rcvSeq;
+	        	$prevCseq = $this->rcvSeq;
 
 	        	$rcvTimestamp = $temp[1];
 
 	        	$latency = round(($timestamp - $rcvTimestamp) * 1000, 4);
 
-	        	$latencySum+= $latency;
+	        	$this->latencySum+= $latency;
 
-	        	if ($latencyMax === null && $latencyMin === null) {
-	        		$latencyMax = $latency;
-	        		$latencyMin = $latency;
+	        	if ($this->latencyMax === null && $this->latencyMin === null) {
+	        		$this->latencyMax = $latency;
+	        		$this->latencyMin = $latency;
 	        	}
 
-	        	if ($latency > $latencyMax) {
-	        		$latencyMax = $latency;
+	        	if ($latency > $this->latencyMax) {
+	        		$this->latencyMax = $latency;
 	        	}
 
-	        	if ($latency < $latencyMin) {
-	        		$latencyMin = $latency;
+	        	if ($latency < $this->latencyMin) {
+	        		$this->latencyMin = $latency;
 	        	}
 
-	        	if ($reportCounter >= $reportEveryPackets) {
+	        }
 
-	        		if ($lost) {
-	        			$lostPercent = round($lost / $reportCounter * 100, 2);
-	        		} else {
-	        			$lostPercent = 0;
-	        		}
-
-	        		$jitter = round($this->standardDeviation($jitterBuffer), 2);
-
-	        		$latencyAverage = round($latencySum / $reportCounter, 2);
-	        		$previousAverage = round($previousSum / $reportCounter, 2);
-
-        			$stats = [
-        				"timestamp" 	=> date("Y-m-d H:i:s"),
-        				"from_ip"		=> $data['from_ip'],
-        				"from_port"		=> $data['from_port'],
-        				"seq"			=> $rcvSeq,
-        				"previous"	    => $previousAverage,
-        				"previous_max"  => $previousMax,
-        				"previous_min"  => $previousMin,
-        				"latency"		=> $latencyAverage,
-        				"latency_max"	=> $latencyMax,
-        				"latency_min"	=> $latencyMin,
-        				"jitter"		=> $jitter,
-        				"lost_percent"	=> $lostPercent,
-        				"out_of_order"	=> $outOfOrder
-        			];
-
-	        		$this->logger->logStats($stats);
-
-	        		$reportCounter = 0;
-					$previousMin = null;
-					$previousMax = null;
-					$latencyMax = null;
-					$latencyMin = null;
-	        		$lost = 0;
-	        		$outOfOrder = 0;
-	        		$jitterBuffer = [];
-	        		$latencySum = 0;
-	        		$previousSum = 0;
-	        	}
+	        if ($this->doReport && $this->receivedCount >= $this->packetsPerInterval) {
+	        	$this->reportStats();
 	        }
 
 	        if (count($this->rawBuffer) > $this->flushInterval) {
@@ -372,7 +345,7 @@ class Core
             throw new \Exception(sprintf("Failed to bind 0.0.0.0:%d, %s", $this->port, socket_strerror($err_no)));
         }
         
-        if (!@socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, array("sec"=>2,"usec"=>0))) {
+        if (!@socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, array("sec"=>1,"usec"=>0))) {
             $err_no = socket_last_error($this->socket);
             throw new \Exception(socket_strerror($err_no));
         }
@@ -403,6 +376,13 @@ class Core
         if (!$msg) {
         	return false;
         }
+
+        if ($this->fromIp === null && $this->fromPort === null) {
+        	$this->fromIp = $fromIp;
+        	$this->fromPort = $fromPort;
+        } else if ($this->fromIp != $fromIp || $this->fromPort != $fromPort) {
+        	die(sprintf("Error: sender changed from %s:%d to %s:%d, aborting...\n", $this->fromIp, $this->fromPort, $fromIp, $fromPort));
+        }
         
         return [
         	"timestamp"	=> microtime(true),
@@ -421,10 +401,111 @@ class Core
 	    }
     }
 
+    private function reportStats($lossBasedOnTime = false)
+    {
+
+    	$timestamp = time();
+
+    	echo "packets per interval: " . $this->packetsPerInterval . ", received: " . $this->receivedCount."\n";
+
+    	if ($lossBasedOnTime) {
+    		echo "## reporting based on time\n";
+			if ($this->receivedCount) {
+				$lostPackets = $this->packetsPerInterval - $this->receivedCount;
+				$lostPercent = round($lostPackets / $this->packetsPerInterval * 100, 2);
+			} else {
+				$lostPercent = 100;
+			}
+
+			$timestamp-= 1; // when doing lossBasedOnTime we are 1 second behind, so need to adjust for that
+
+			$this->prevTime = 0;
+    	} else {
+			if ($this->lost) {
+				$lostPercent = round($this->lost / $this->packetsPerInterval * 100, 2);
+			} else {
+				$lostPercent = 0;
+			}
+    	}
+
+		if ($this->jitterBuffer) {
+			$jitter = round($this->standardDeviation($this->jitterBuffer), 2);
+		} else {
+			$jitter = 0;
+		}
+
+		$latencyAverage = round($this->latencySum / $this->packetsPerInterval, 2);
+		$previousAverage = round($this->previousSum / $this->packetsPerInterval, 2);
+
+		$stats = [
+			"timestamp" 	=> date("Y-m-d H:i:s", $timestamp),
+			"from_ip"		=> $this->fromIp,
+			"from_port"		=> $this->fromPort,
+			"seq"			=> $this->rcvSeq,
+			"previous"	    => $previousAverage,
+			"previous_max"  => $this->previousMax,
+			"previous_min"  => $this->previousMin,
+			"latency"		=> $latencyAverage,
+			"latency_max"	=> $this->latencyMax,
+			"latency_min"	=> $this->latencyMin,
+			"jitter"		=> $jitter,
+			"lost_percent"	=> $lostPercent,
+			"out_of_order"	=> $this->outOfOrder
+		];
+
+		$this->logger->logStats($stats);
+
+    	if ($lossBasedOnTime) {
+    		// since we are second behind need to add expected amount of packets received
+    		$this->receivedCount = $this->pps;
+    	} else {
+    		$this->receivedCount = 0;
+    	}
+
+		$this->previousMin = null;
+		$this->previousMax = null;
+		$this->latencyMax = null;
+		$this->latencyMin = null;
+		$this->lost = 0;
+		$this->outOfOrder = 0;
+		$this->jitterBuffer = [];
+		$this->latencySum = 0;
+		$this->previousSum = 0;
+		
+		$this->doReport = false;
+    }
+
+    public function tickHandler()
+    {
+    	$time = time();
+
+    	$this->packetsPerInterval = $this->reportInterval * $this->pps;
+
+    	if ($this->doReport && $time > $this->lastReportAt) {
+    		$this->reportStats(true);
+    	}
+
+    	if ($time % $this->reportInterval === 0) {
+
+    		if ($this->lastReportAt === $time) {
+    			return;
+    		}
+
+    		$this->lastReportAt = $time;
+
+    		if ($this->fromIp === null && $this->fromPort === null) {
+    			echo date("Y-m-d H:i:s") . ": no packets received yet, waiting...\n";
+    			return;
+    		}
+
+    		$this->doReport = true;
+    	}
+    }
+
     /**
      * Signal handler
      */
-    private function signalHandler($signal)
+    public function signalHandler($signal)
     {
         switch($signal) {
             case SIGTERM:
