@@ -67,7 +67,6 @@ class Core
 
         pcntl_signal(SIGTERM, array($this,"signalHandler"));
         pcntl_signal(SIGINT, array($this,"signalHandler"));
-        register_tick_function(array($this, "tickHandler"));
 
 		if (in_array("-h", $argv) || in_array("--h", $argv) || in_array("-help", $argv) || in_array("--help", $argv)) {
 			$this->printUsage();
@@ -78,6 +77,7 @@ class Core
 		}
 
 		if (in_array("-s", $argv)) {
+			register_tick_function(array($this, "tickHandler"));
 			$this->setMode(self::MODE_SERVER);
 		}
 
