@@ -405,13 +405,12 @@ class Core
 
     private function reportStats($lossBasedOnTime = false)
     {
-
     	$timestamp = time();
 
-    	echo "packets per interval: " . $this->packetsPerInterval . ", received: " . $this->receivedCount."\n";
+    	$packetsCount = ($this->receivedCount) ? $this->receivedCount : $this->packetsPerInterval;
 
     	if ($lossBasedOnTime) {
-    		echo "## reporting based on time\n";
+    		
 			if ($this->receivedCount) {
 				$lostPackets = $this->packetsPerInterval - $this->receivedCount;
 				$lostPercent = round($lostPackets / $this->packetsPerInterval * 100, 2);
@@ -424,7 +423,7 @@ class Core
 			$this->prevTime = 0;
     	} else {
 			if ($this->lost) {
-				$lostPercent = round($this->lost / $this->packetsPerInterval * 100, 2);
+				$lostPercent = round($this->lost / $packetsCount * 100, 2);
 			} else {
 				$lostPercent = 0;
 			}
@@ -436,8 +435,8 @@ class Core
 			$jitter = 0;
 		}
 
-		$latencyAverage = round($this->latencySum / $this->packetsPerInterval, 2);
-		$previousAverage = round($this->previousSum / $this->packetsPerInterval, 2);
+		$latencyAverage = round($this->latencySum / $packetsCount, 2);
+		$previousAverage = round($this->previousSum / $packetsCount, 2);
 
 		$stats = [
 			"timestamp" 	=> date("Y-m-d H:i:s", $timestamp),
@@ -480,8 +479,6 @@ class Core
     public function tickHandler()
     {
     	$time = time();
-
-    	$this->packetsPerInterval = $this->reportInterval * $this->pps;
 
     	if ($this->doReport && $time > $this->lastReportAt) {
     		$this->reportStats(true);
