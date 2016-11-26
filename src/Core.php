@@ -16,6 +16,7 @@ class Core
 	private $reportInterval = 10;
 	private $flushInterval = 1000;
 	private $packetsPerInterval;
+	private $minPacketsForStats;
 	private $socket;
 	private $keepRunning = true;
 	private $logger;
@@ -107,6 +108,7 @@ class Core
 		}
 
 		$this->packetsPerInterval = $this->reportInterval * $this->pps;
+		$this->minPacketsForStats = $this->packetsPerInterval * 0.5;
 
 		if (in_array("-c", $argv)) {
 			
@@ -260,7 +262,7 @@ class Core
 
 	        }
 
-	        if ($this->doReport && $this->receivedCount >= $this->packetsPerInterval) {
+	        if ($this->doReport && $this->receivedCount >= $this->minPacketsForStats) {
 	        	$this->reportStats();
 	        }
 
